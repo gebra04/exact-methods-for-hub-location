@@ -1,5 +1,7 @@
 import argparse
 import csv
+import hashlib
+import json
 import os
 import re
 import sys
@@ -10,10 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import pulp
 
-if __package__:
-    from .build import build_problem
-else:
-    from build import build_problem
+from build import build_problem
 
 
 def read_args() -> tuple[str, str, int, int, list[float], float, float, float]:
@@ -104,10 +103,7 @@ def save_csv(
         "hubs",
         "flow",
     ]
-    has_solution = prob.sol_status in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible) and prob.valid(1e-5)
     status = pulp.LpStatus[prob.status]
-    if has_solution and prob.sol_status == pulp.LpSolutionIntegerFeasible:
-        status = "Feasible (not proven optimal)"
     new = not os.path.exists(path)
 
     with open(path, "a", newline="", encoding="utf-8") as f:
@@ -118,7 +114,7 @@ def save_csv(
         w.writerow(
             [
                 status,
-                pulp.value(prob.objective) if has_solution else None,
+                pulp.value(prob.objective),
                 round(time, 4),
                 p,
                 r,
@@ -217,7 +213,7 @@ def generate_dot(
             demand = w[i][j] if w is not None else 1.0
             flows[(k, l)] = flows.get((k, l), 0.0) + val * demand
 
-    max_flow = max(flows.values(), default=0.0) or 1.0
+    max_flow = max(flows.values(), default=1.0)
 
     for (k, l), flow in sorted(flows.items()):
         # Edge thickness proportional to flow (between 1 and 5).
@@ -233,25 +229,20 @@ def generate_dot(
 
 
 def solve_problem(dataset, p, r, B, alpha, lamb=1.0, delta=1.0,
-                  time_limit=60.0, log_path=None):
+                  log_path=None):
     """Build and solve one case, returning model, demands and separate timings.
 
     Expand a uniform fallback capacity; capacities in the input take precedence.
-    The CBC time limit is measured in seconds and excludes model construction.
     """
-    if not np.isfinite(time_limit) or time_limit <= 0:
-        raise ValueError("time_limit must be finite and positive")
     with open(dataset, encoding="utf-8") as handle:
         n = int(handle.readline())
-    if not 1 <= r <= p <= n:
-        raise ValueError("Require 1 <= r <= p <= n")
     if B is not None and len(B) == 1:
         B = B * n
     start = perf_counter()
     prob, w = build_problem(dataset, p, r, B, alpha, lamb, delta)
     build_seconds = perf_counter() - start
     start = perf_counter()
-    prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit, logPath=log_path))
+    prob.solve(pulp.COIN_CMD(msg=False, logPath=log_path))
     return prob, w, build_seconds, perf_counter() - start
 
 
@@ -265,18 +256,10 @@ def main(
     lamb: float,
     delta: float,
 ):
-    prob, w, _, solve_seconds = solve_problem(dataset, p, r, B, alpha, lamb, delta)
+    prob, w, _, solve_seconds = solve_problem(
+        dataset, p, r, B, alpha, lamb, delta
+    )
     Path(results).parent.mkdir(parents=True, exist_ok=True)
-    # Record the actual file capacities when they override the fallback.
-    with open(dataset, encoding="utf-8") as handle:
-        n = int(handle.readline())
-        data = np.loadtxt(handle, ndmin=2)
-    B = data[2*n].tolist() if len(data) > 2*n else B
-    if prob.sol_status not in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible) or not prob.valid(1e-5):
-        print("No validated solution:", pulp.LpStatus[prob.status])
-        save_csv(prob, solve_seconds, p, r, B, alpha, lamb, delta, [], {}, results)
-        return
-
     print("Status:", pulp.LpStatus[prob.status])
     print("Objective:", pulp.value(prob.objective))
 
@@ -310,13 +293,111 @@ def main(
     generate_dot(z, x, w, str(Path(results).with_suffix(".dot")))
 
 
+SUMMARY_FIELDS = [
+    "schema_version", "instance", "n", "p", "r", "alpha", "lamb", "delta",
+    "effective_capacity", "status", "solution_status", "has_solution",
+    "objective", "build_seconds", "solve_seconds", "total_seconds",
+    "solver_log_path", "error",
+]
+
+
+def _read_metadata(path: Path, capacity: float | None) -> tuple[int, list[float] | None]:
+    """Read dimensions and capacities, preferring the input capacity row."""
+    with path.open(encoding="utf-8") as handle:
+        n = int(handle.readline())
+        data = np.loadtxt(handle, ndmin=2)
+    if len(data) > 2*n:
+        capacities = data[2*n].tolist()
+    else:
+        capacities = [capacity] * n if capacity is not None else None
+    return n, capacities
+
+
+def _save_result(path: Path, result: dict) -> None:
+    temporary = path.with_suffix(".json.tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(result, handle, indent=2, allow_nan=False)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
+
+
+def run_experiment(argv=None) -> int:
+    """Run a single case and persist JSON, summary CSV, CBC log and DOT.
+
+    Return 1 on execution errors; infeasibility is a recorded solver outcome.
+    Node indices in JSON and DOT are zero-based.
+    """
+    parser = argparse.ArgumentParser(description="Solve one experiment and save CSV, JSON, CBC log and DOT.")
+    parser.add_argument("instance", type=Path)
+    parser.add_argument("--p", type=int, required=True)
+    parser.add_argument("--r", type=int, required=True)
+    parser.add_argument("--alpha", type=float, required=True)
+    parser.add_argument("--capacity", type=float)
+    parser.add_argument("--session", type=Path, required=True)
+    args = parser.parse_args(argv)
+    instance = args.instance.expanduser().resolve()
+    n, capacities = _read_metadata(instance, args.capacity)
+
+    args.session.mkdir(parents=True, exist_ok=True)
+    tag = hashlib.sha1(str(instance).encode("utf-8")).hexdigest()[:10]
+    stem = f"{instance.stem}-{tag}-p{args.p}-r{args.r}-a{args.alpha!r}"
+    log_path = args.session / f"{stem}.cbc.log"
+    dot_path = args.session / f"{stem}.cbc.dot"
+    result = dict(
+        schema_version=1, instance=str(instance), n=n, p=args.p, r=args.r,
+        alpha=args.alpha, lamb=1.0, delta=1.0, effective_capacity=capacities,
+        status="not_run", solution_status="none", has_solution=False,
+        objective=None, build_seconds=None, solve_seconds=None, total_seconds=None,
+        hubs=[], allocations=[], routes=[], hub_flows={}, dot_path=None,
+        solver_log_path=str(log_path.resolve()), error=None,
+    )
+    started = perf_counter()
+    try:
+        prob, w, build_seconds, solve_seconds = solve_problem(
+            str(instance), args.p, args.r, capacities, args.alpha,
+            log_path=str(log_path),
+        )
+        result.update(build_seconds=build_seconds, solve_seconds=solve_seconds,
+                      status=pulp.LpStatus[prob.status],
+                      solver_status=pulp.LpStatus.get(prob.status, str(prob.status)))
+        result.update(
+            has_solution=prob.status == pulp.LpStatusOptimal,
+            solution_status=pulp.LpSolution[prob.sol_status],
+        )
+        z, x = variable(prob, "z"), variable(prob, "x")
+        result.update(
+            objective=float(pulp.value(prob.objective) or 0.0),
+            hubs=sorted(k for (i, k), value in z.items() if i == k and value > .5),
+            allocations=[[i, k] for (i, k), value in sorted(z.items()) if value > .5],
+            routes=[[i, j, k, l, float(value)] for (i, j, k, l), value in sorted(x.items()) if value > 1e-7],
+            hub_flows=hubs_flow(z, x, w),
+        )
+        generate_dot(z, x, w, str(dot_path))
+        result["dot_path"] = str(dot_path.resolve())
+    except (Exception, SystemExit) as exc:
+        result.update(status="error", error=f"{type(exc).__name__}: {exc}")
+    result["total_seconds"] = perf_counter() - started
+    json_path = args.session / f"{stem}.json"
+    _save_result(json_path, result)
+    summary_path = args.session / "summary.csv"
+    new = not summary_path.exists() or summary_path.stat().st_size == 0
+    summary = {key: result[key] for key in SUMMARY_FIELDS}
+    summary["effective_capacity"] = json.dumps(capacities)
+    # Shell executes cases sequentially, so each process appends one row.
+    with summary_path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        if new:
+            writer.writeheader()
+        writer.writerow(summary)
+        handle.flush()
+        os.fsync(handle.fileno())
+    print(f"[{result['status']}] objective={result['objective']} — {json_path}", flush=True)
+    return 1 if result["error"] else 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--experiment":
-        del sys.argv[1]
-        if __package__:
-            from .run_experiment import main as run_experiment
-        else:
-            from run_experiment import main as run_experiment
-        raise SystemExit(run_experiment())
-    dataset, results, p, r, B, alpha, lamb, delta = read_args()
-    main(dataset, results, p, r, B, alpha, lamb, delta)
+        raise SystemExit(run_experiment(sys.argv[2:]))
+    main(*read_args())

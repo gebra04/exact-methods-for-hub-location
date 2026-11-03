@@ -9,7 +9,6 @@ Usage: bash experiments.sh INSTANCE... [options]
   --r INTEGER...       Allocation limits (default: 1 through p)
   --alpha NUMBER...    Discounts (default: 0.25 0.5 1.0)
   --capacity NUMBER    Uniform capacity when absent from the instance
-  --time-limit NUMBER  CBC time limit in seconds (default: 60)
   --output DIRECTORY   Session parent directory (default: results)
   -h, --help           Show this help
 Paths are relative to the caller's directory. PYTHON selects the interpreter;
@@ -18,7 +17,7 @@ HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 instances=() p_values=(1 2) r_values=() alpha_values=(0.25 0.5 1.0)
-capacity=() time_limit=60 output=results
+capacity=() output=results
 while (($#)); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
@@ -31,12 +30,11 @@ while (($#)); do
                 --r) r_values=("${values[@]}") ;;
                 --alpha) alpha_values=("${values[@]}") ;;
             esac ;;
-        --capacity|--time-limit|--output)
+        --capacity|--output)
             option="$1"
             (($# >= 2)) && [[ "$2" != --* ]] || fail "$option requires a value"
             case "$option" in
                 --capacity) capacity=(--capacity "$2") ;;
-                --time-limit) time_limit="$2" ;;
                 --output) output="$2" ;;
             esac
             shift 2 ;;
@@ -54,7 +52,6 @@ check_number() {
     LC_ALL=C awk -v v="$value" -v upper="$upper" 'BEGIN {exit !(v+0>0 && v+0<1e308 && (!upper || v+0<=upper))}' || fail "Number out of range: $value"
 }
 for value in "${alpha_values[@]}"; do check_number "$value" 1; done
-check_number "$time_limit" 0
 if ((${#capacity[@]})); then check_number "${capacity[1]}" 0; fi
 for instance in "${instances[@]}"; do
     [[ -f "$instance" && -r "$instance" ]] || fail "Cannot read instance: $instance"
@@ -87,7 +84,7 @@ for instance in "${instances[@]}"; do
     dataset="$(basename -- "$instance")"
     dataset="${dataset%.*}"
     dataset="$(printf '%s' "$dataset" | LC_ALL=C tr -c '[:alnum:]_.-' '_')"
-    session="$(create_session "$output/${dataset}_p-${p_tag}_r-${r_tag}_alpha-${alpha_tag}_capacity-${capacity_tag}_time-${time_limit}")"
+    session="$(create_session "$output/${dataset}_p-${p_tag}_r-${r_tag}_alpha-${alpha_tag}_capacity-${capacity_tag}")"
     printf 'Session: %s\n' "$session"
     n="$(head -n 1 -- "$instance" | tr -d '[:space:]')"
     [[ "$n" =~ ^[1-9][0-9]*$ && ${#n} -le 8 ]] || fail "Invalid node count in $instance"
@@ -106,7 +103,7 @@ for instance in "${instances[@]}"; do
                 printf '[run] %s p=%s r=%s alpha=%s\n' "$instance" "$p" "$r" "$alpha"
                 "$python_bin" "$project_dir/src/main.py" --experiment "$instance" \
                     --p "$p" --r "$r" --alpha "$alpha" "${capacity[@]}" \
-                    --time-limit "$time_limit" --session "$session"
+                    --session "$session"
                 runs=$((runs + 1))
             done
         done
