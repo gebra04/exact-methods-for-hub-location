@@ -2,13 +2,18 @@ import argparse
 import csv
 import os
 import re
+import sys
+from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 import numpy.typing as npt
 import pulp
 
-from build import build_problem
+if __package__:
+    from .build import build_problem
+else:
+    from build import build_problem
 
 
 def read_args() -> tuple[str, str, int, int, list[float], float, float, float]:
@@ -99,6 +104,10 @@ def save_csv(
         "hubs",
         "flow",
     ]
+    has_solution = prob.sol_status in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible) and prob.valid(1e-5)
+    status = pulp.LpStatus[prob.status]
+    if has_solution and prob.sol_status == pulp.LpSolutionIntegerFeasible:
+        status = "Feasible (not proven optimal)"
     new = not os.path.exists(path)
 
     with open(path, "a", newline="", encoding="utf-8") as f:
@@ -108,8 +117,8 @@ def save_csv(
 
         w.writerow(
             [
-                pulp.LpStatus[prob.status],
-                pulp.value(prob.objective),
+                status,
+                pulp.value(prob.objective) if has_solution else None,
                 round(time, 4),
                 p,
                 r,
@@ -208,7 +217,7 @@ def generate_dot(
             demand = w[i][j] if w is not None else 1.0
             flows[(k, l)] = flows.get((k, l), 0.0) + val * demand
 
-    max_flow = max(flows.values(), default=1.0)
+    max_flow = max(flows.values(), default=0.0) or 1.0
 
     for (k, l), flow in sorted(flows.items()):
         # Edge thickness proportional to flow (between 1 and 5).
@@ -223,6 +232,29 @@ def generate_dot(
         f.write("\n".join(lines))
 
 
+def solve_problem(dataset, p, r, B, alpha, lamb=1.0, delta=1.0,
+                  time_limit=60.0, log_path=None):
+    """Build and solve one case, returning model, demands and separate timings.
+
+    Expand a uniform fallback capacity; capacities in the input take precedence.
+    The CBC time limit is measured in seconds and excludes model construction.
+    """
+    if not np.isfinite(time_limit) or time_limit <= 0:
+        raise ValueError("time_limit must be finite and positive")
+    with open(dataset, encoding="utf-8") as handle:
+        n = int(handle.readline())
+    if not 1 <= r <= p <= n:
+        raise ValueError("Require 1 <= r <= p <= n")
+    if B is not None and len(B) == 1:
+        B = B * n
+    start = perf_counter()
+    prob, w = build_problem(dataset, p, r, B, alpha, lamb, delta)
+    build_seconds = perf_counter() - start
+    start = perf_counter()
+    prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit, logPath=log_path))
+    return prob, w, build_seconds, perf_counter() - start
+
+
 def main(
     dataset: str,
     results: str,
@@ -233,11 +265,17 @@ def main(
     lamb: float,
     delta: float,
 ):
-    prob, w = build_problem(dataset, p, r, B, alpha, lamb, delta)
-
-    start = perf_counter()
-    prob.solve(pulp.COIN_CMD(msg=False))
-    end = perf_counter()
+    prob, w, _, solve_seconds = solve_problem(dataset, p, r, B, alpha, lamb, delta)
+    Path(results).parent.mkdir(parents=True, exist_ok=True)
+    # Record the actual file capacities when they override the fallback.
+    with open(dataset, encoding="utf-8") as handle:
+        n = int(handle.readline())
+        data = np.loadtxt(handle, ndmin=2)
+    B = data[2*n].tolist() if len(data) > 2*n else B
+    if prob.sol_status not in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible) or not prob.valid(1e-5):
+        print("No validated solution:", pulp.LpStatus[prob.status])
+        save_csv(prob, solve_seconds, p, r, B, alpha, lamb, delta, [], {}, results)
+        return
 
     print("Status:", pulp.LpStatus[prob.status])
     print("Objective:", pulp.value(prob.objective))
@@ -266,12 +304,19 @@ def main(
             print(f"  x[{i},{j},{k},{l}] = {val:.4f}   ({i} -> {k} -> {l} -> {j})")
 
     # Saving the results to a CSV file.
-    save_csv(prob, end - start, p, r, B, alpha, lamb, delta, hubs, flow, results)
+    save_csv(prob, solve_seconds, p, r, B, alpha, lamb, delta, hubs, flow, results)
 
     # Generating dot.
-    generate_dot(z, x, w)
+    generate_dot(z, x, w, str(Path(results).with_suffix(".dot")))
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--experiment":
+        del sys.argv[1]
+        if __package__:
+            from .run_experiment import main as run_experiment
+        else:
+            from run_experiment import main as run_experiment
+        raise SystemExit(run_experiment())
     dataset, results, p, r, B, alpha, lamb, delta = read_args()
     main(dataset, results, p, r, B, alpha, lamb, delta)
