@@ -2,6 +2,7 @@ import sys
 from itertools import product
 
 import numpy as np
+import numpy.typing as npt
 import pulp
 
 
@@ -13,7 +14,7 @@ def build_problem(
     alpha: float,
     lamb: float = 1.0,
     delta: float = 1.0,
-) -> pulp.LpProblem:
+) -> tuple[pulp.LpProblem, npt.NDArray[np.float64]]:
     """
     Build a PuLP solver for the Capacitated r-Allocation p-Hub Median Problem using a MILP formulation.
 
@@ -29,7 +30,7 @@ def build_problem(
     - delta (float): distribution cost coefficient.
 
     # Returns:
-    Instance of the modeled problem.
+    Instance of the modeled problem and flow demand matrix.
     """
 
     # Checking parameters.
@@ -142,4 +143,4 @@ def build_problem(
             f"Constraint_10_{k}",
         )
 
-    return prob
+    return prob, w
