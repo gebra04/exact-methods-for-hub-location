@@ -1,23 +1,25 @@
 # Exact methods for hub location
 
+English | [Português (Brasil)](README.pt-BR.md)
+
 Authors: [@ValimD](https://github.com/ValimD), [@HenriUz](https://github.com/HenriUz), [@gebra04](https://github.com/gebra04)
 
-Implementation of the **Capacitated r-Allocation p-Hub Median Problem (CrApHMP)** for the Métodos Exatos (XMAC02) course, taught by Prof. Sávio S. Dias at UNIFEI, in the second semester of 2026. The formulation and experimental objectives follow the [assignment](trabalho2.pdf).
+Implementation of the **Capacitated r-Allocation p-Hub Median Problem (CrApHMP)** for the Métodos Exatos (XMAC02) course. The formulation and experimental objectives follow the [assignment](trabalho2.pdf).
 
 ## Problem
 
 Given a set of nodes representing origins, destinations, and candidate hub locations, the problem selects exactly **p hubs** and routes demand through them to minimize total transportation cost. Each node can be allocated to at most **r hubs**, and the total flow handled by each hub must respect its capacity.
 
-| Parameter | Meaning |
-| --- | --- |
-| `n` | Number of nodes |
-| `w[i,j]` | Flow demand from node `i` to node `j` |
-| `d[i,j]` | Distance or unit transportation cost from `i` to `j` |
-| `p` | Number of hubs to open |
-| `r` | Maximum number of hub allocations per node, with `1 <= r <= p <= n` |
-| `B[k]` | Capacity of candidate hub `k` |
-| `alpha` | Inter-hub transportation discount, with `0 < alpha <= 1` |
-| `lambda`, `delta` | Collection and distribution cost coefficients |
+| Parameter     | Meaning                                                             |
+| ------------- | ------------------------------------------------------------------- |
+| n             | Number of nodes                                                     |
+| w[i,j]        | Flow demand from node `i` to node `j`                               |
+| d[i,j]        | Distance or unit transportation cost from `i` to `j`                |
+| p             | Number of hubs to open                                              |
+| r             | Maximum number of hub allocations per node, with `1 <= r <= p <= n` |
+| B[k]          | Capacity of candidate hub `k`                                       |
+| alpha         | Inter-hub transportation discount, with `0 < alpha <= 1`            |
+| lambda, delta | Collection and distribution cost coefficients                       |
 
 A route follows `i -> k -> l -> j`, where `k` and `l` are hubs. Its unit transportation cost is:
 
@@ -31,13 +33,11 @@ When `k = l`, the route uses a single hub. Setting `r = 1` gives single allocati
 
 The input files available in this repository are:
 
-| Dataset | Files | Description |
-| --- | --- | --- |
-| CAB | `datasets/CAB25.txt` | Passenger flows and distances between 25 US cities; attributed in the assignment to O'Kelly (1987) |
-| AP | `datasets/AP40.txt`, `datasets/AP80.txt` | Instances with 40 and 80 nodes derived from Australian postal data; attributed to Ernst and Krishnamoorthy (1996) |
-| Dummy | `datasets/dummy/toy1.txt` through `toy8.txt` | Small instances for checking the model and inspecting solution structures |
-
-The assignment also describes USA423, but that dataset is not included in this repository.
+| Dataset | Files                                        | Description                                                                                                       |
+| ------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| CAB     | `datasets/CAB25.txt`                         | Passenger flows and distances between 25 US cities; attributed in the assignment to O'Kelly (1987)                |
+| AP      | `datasets/AP40.txt`, `datasets/AP80.txt`     | Instances with 40 and 80 nodes derived from Australian postal data; attributed to Ernst and Krishnamoorthy (1996) |
+| Dummy   | `datasets/dummy/toy1.txt` through `toy8.txt` | Small instances for checking the model and inspecting solution structures                                         |
 
 Each text file contains, in order:
 
@@ -46,7 +46,7 @@ Each text file contains, in order:
 3. The `n x n` distance matrix `d`.
 4. An optional row with `n` hub capacities.
 
-Values are separated by whitespace. Lines beginning with `#` are comments, so a commented capacity row does not supply capacities. Demands and distances must be finite and nonnegative; the experiment interface requires positive capacities.
+Values are separated by whitespace. Lines beginning with `#` are comments; the experiment interface requires positive capacities.
 
 AP demands may be asymmetric (`w[i,j] != w[j,i]`) and may have positive diagonal entries (`w[i,i] > 0`). The implementation preserves these values.
 
@@ -71,15 +71,21 @@ The constraints enforce exactly `p` open hubs, allocation only to open hubs, at 
 
 The implementation creates `n²` binary allocation variables and `n⁴` continuous routing variables. Consequently, model construction and memory consumption can become substantial for larger instances, independently of the solver's time limit.
 
-| File | Responsibility |
-| --- | --- |
-| `src/build.py` | Read the instance and construct the MILP |
-| `src/main.py` | Build and solve a case; extract allocations and routes; export DOT |
-| `src/run_experiment.py` | Execute one experimental case and save its metadata and outputs |
-| `experiments.sh` | Iterate over datasets and parameter combinations sequentially |
-| `src/visualize.py` | Build an HTML report from experiment JSON files |
-
 The experimental interface uses `lambda = delta = 1`. It distinguishes proven optimal solutions from feasible incumbents whose optimality has not been proved. Reaching the time limit does not, by itself, establish infeasibility or optimality.
+
+## Architecture
+
+The project separates model construction, solving, experiment orchestration, and visualization.
+
+| File                    | Responsibility                                                     |
+| ----------------------- | ------------------------------------------------------------------ |
+| `src/build.py`          | Read the instance and construct the MILP                           |
+| `src/main.py`           | Build and solve a case; extract allocations and routes; export DOT |
+| `src/run_experiment.py` | Execute one experimental case and save its metadata and outputs    |
+| `experiments.sh`        | Iterate over datasets and parameter combinations sequentially      |
+| `src/visualize.py`      | Build an HTML report from experiment JSON files                    |
+
+For each parameter combination, `experiments.sh` launches `src/main.py --experiment`, which delegates execution and output persistence to `src/run_experiment.py`. The runner calls `solve_problem` in `src/main.py`, which constructs the model through `src/build.py` and invokes CBC. After the experiments, `src/visualize.py` reads the saved JSON files to generate the HTML report.
 
 ## Installation
 
@@ -123,14 +129,14 @@ bash experiments.sh datasets/dummy/toy1.txt \
 
 Without `--r`, the script tries every integer from `1` through the current `p`. To select particular allocation limits, pass a list such as `--r 1 2`.
 
-| Option | Meaning | Default |
-| --- | --- | --- |
-| `--p INTEGER...` | Hub counts | `1 2` |
-| `--r INTEGER...` | Allocation limits | All integers from `1` to each `p` |
-| `--alpha NUMBER...` | Inter-hub discount factors | `0.25 0.5 1.0` |
-| `--capacity NUMBER` | Uniform capacity if absent from the input | Use the file's capacity row |
-| `--time-limit NUMBER` | CBC time limit per case, in seconds | `60` |
-| `--output DIRECTORY` | Parent directory for experiment sessions | `results` |
+| Option                | Meaning                                   | Default                           |
+| --------------------- | ----------------------------------------- | --------------------------------- |
+| `--p INTEGER...`      | Hub counts                                | `1 2`                             |
+| `--r INTEGER...`      | Allocation limits                         | All integers from `1` to each `p` |
+| `--alpha NUMBER...`   | Inter-hub discount factors                | `0.25 0.5 1.0`                    |
+| `--capacity NUMBER`   | Uniform capacity if absent from the input | Use the file's capacity row       |
+| `--time-limit NUMBER` | CBC time limit per case, in seconds       | `60`                              |
+| `--output DIRECTORY`  | Parent directory for experiment sessions  | `results`                         |
 
 Place dataset paths before the options. The script starts a separate Python process for each dataset and valid `(p, r, alpha)` combination, waiting for it to finish before starting the next. Combinations with `p > n` or `r > p` are skipped.
 
