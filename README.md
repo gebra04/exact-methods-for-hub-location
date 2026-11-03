@@ -46,7 +46,7 @@ Each text file contains, in order:
 3. The `n x n` distance matrix `d`.
 4. An optional row with `n` hub capacities.
 
-Values are separated by whitespace. Lines beginning with `#` are comments; the experiment interface requires positive capacities.
+Values are separated by whitespace. Lines beginning with `#` are comments.
 
 AP demands may be asymmetric (`w[i,j] != w[j,i]`) and may have positive diagonal entries (`w[i,i] > 0`). The implementation preserves these values.
 
@@ -69,23 +69,22 @@ $$
 
 The constraints enforce exactly `p` open hubs, allocation only to open hubs, at most `r` allocations per node, complete routing of each origin-destination flow, and consistency between routes and allocations. Hub capacities account for flow handled as either the first or second hub; a route with `k = l` consumes that hub's capacity only once.
 
-The implementation creates `n²` binary allocation variables and `n⁴` continuous routing variables. Consequently, model construction and memory consumption can become substantial for larger instances, independently of the solver's time limit.
+The implementation creates `n²` binary allocation variables and `n⁴` continuous routing variables. Consequently, model construction and memory consumption can become substantial for larger instances.
 
-The experimental interface uses `lambda = delta = 1`. It distinguishes proven optimal solutions from feasible incumbents whose optimality has not been proved. Reaching the time limit does not, by itself, establish infeasibility or optimality.
+The experimental interface uses `lambda = delta = 1`. Statuses are displayed directly from `pulp.LpStatus[prob.status]`.
 
 ## Architecture
 
 The project separates model construction, solving, experiment orchestration, and visualization.
 
-| File                    | Responsibility                                                     |
-| ----------------------- | ------------------------------------------------------------------ |
-| `src/build.py`          | Read the instance and construct the MILP                           |
-| `src/main.py`           | Build and solve a case; extract allocations and routes; export DOT |
-| `src/run_experiment.py` | Execute one experimental case and save its metadata and outputs    |
-| `experiments.sh`        | Iterate over datasets and parameter combinations sequentially      |
-| `src/visualize.py`      | Build an HTML report from experiment JSON files                    |
+| File               | Responsibility                                                     |
+| ------------------ | ------------------------------------------------------------------ |
+| `src/build.py`     | Read the instance and construct the MILP                           |
+| `src/main.py`      | Build and solve a case; extract allocations and routes; export DOT |
+| `experiments.sh`   | Iterate over datasets and parameter combinations sequentially      |
+| `src/visualize.py` | Build an HTML report from experiment JSON files                    |
 
-For each parameter combination, `experiments.sh` launches `src/main.py --experiment`, which delegates execution and output persistence to `src/run_experiment.py`. The runner calls `solve_problem` in `src/main.py`, which constructs the model through `src/build.py` and invokes CBC. After the experiments, `src/visualize.py` reads the saved JSON files to generate the HTML report.
+For each parameter combination, `experiments.sh` launches `src/main.py --experiment`. The case execution and output persistence are implemented in `main.py` itself. Its `solve_problem` function constructs the model through `src/build.py` and invokes CBC using `COIN_CMD`. The CBC executable must be installed on the system and available as `cbc` on PATH. After the experiments, `src/visualize.py` reads the saved JSON files to generate the HTML report.
 
 ## Installation
 
@@ -123,24 +122,20 @@ Run commands from the repository root. `experiments.sh` selects the project's `.
 ```bash
 bash experiments.sh datasets/dummy/toy1.txt \
   --p 1 2 \
-  --alpha 0.25 0.5 1.0 \
-  --time-limit 60
+  --alpha 0.25 0.5 1.0
 ```
 
 Without `--r`, the script tries every integer from `1` through the current `p`. To select particular allocation limits, pass a list such as `--r 1 2`.
 
-| Option                | Meaning                                   | Default                           |
-| --------------------- | ----------------------------------------- | --------------------------------- |
-| `--p INTEGER...`      | Hub counts                                | `1 2`                             |
-| `--r INTEGER...`      | Allocation limits                         | All integers from `1` to each `p` |
-| `--alpha NUMBER...`   | Inter-hub discount factors                | `0.25 0.5 1.0`                    |
-| `--capacity NUMBER`   | Uniform capacity if absent from the input | Use the file's capacity row       |
-| `--time-limit NUMBER` | CBC time limit per case, in seconds       | `60`                              |
-| `--output DIRECTORY`  | Parent directory for experiment sessions  | `results`                         |
+| Option               | Meaning                                   | Default                           |
+| -------------------- | ----------------------------------------- | --------------------------------- |
+| `--p INTEGER...`     | Hub counts                                | `1 2`                             |
+| `--r INTEGER...`     | Allocation limits                         | All integers from `1` to each `p` |
+| `--alpha NUMBER...`  | Inter-hub discount factors                | `0.25 0.5 1.0`                    |
+| `--capacity NUMBER`  | Uniform capacity if absent from the input | Use the file's capacity row       |
+| `--output DIRECTORY` | Parent directory for experiment sessions  | `results`                         |
 
 Place dataset paths before the options. The script starts a separate Python process for each dataset and valid `(p, r, alpha)` combination, waiting for it to finish before starting the next. Combinations with `p > n` or `r > p` are skipped.
-
-The time limit applies to CBC solving, **not to total execution time**: reading data, constructing the model, and exporting outputs take additional time.
 
 **Run CAB and AP with uniform capacities**
 
@@ -149,11 +144,11 @@ For example, the following commands assign capacity `1000000` to each candidate 
 ```bash
 bash experiments.sh datasets/CAB25.txt \
   --p 2 --r 1 2 --alpha 0.5 \
-  --capacity 1000000 --time-limit 60
+  --capacity 1000000
 
 bash experiments.sh datasets/AP40.txt datasets/AP80.txt \
   --p 2 --r 1 2 --alpha 0.5 \
-  --capacity 1000000 --time-limit 60
+  --capacity 1000000
 ```
 
 To study capacity tightness, invoke the script again with different `--capacity` values. For files containing a capacity row, modify that row or use a separate copy of the instance, since the command-line fallback does not override it.
@@ -163,17 +158,17 @@ To study capacity tightness, invoke the script again with different `--capacity`
 Each dataset receives a session directory named after the dataset and supplied parameters. For the small sweep above:
 
 ```text
-results/toy1_p-1-2_r-auto_alpha-0.25-0.5-1.0_capacity-file_time-60/
+results/toy1_p-1-2_r-auto_alpha-0.25-0.5-1.0_capacity-file/
 ```
 
 Repeated sessions receive suffixes such as `__run2`, preserving previous outputs. Each session contains:
 
 - `summary.csv`: one row per case, with parameters, effective capacities, status, objective, and execution times.
-- One `.json` per case: metadata and, when a validated solution exists, hubs, allocations, routing fractions, and hub loads.
+- One `.json` per case: metadata, hubs, allocations, routing fractions, and hub loads.
 - One `.cbc.log` per solver execution: CBC's log.
-- One `.cbc.dot` per validated solution: allocations and aggregated flows between hubs.
+- One `.cbc.dot` per run: allocations and aggregated flows between hubs.
 
-DOT represents the network graph, while JSON retains the detailed routing fractions used by the interactive report. A case without a validated solution has no solution graph or objective value.
+DOT represents the network graph, while JSON retains the detailed routing fractions used by the interactive report. Values and graphs are exported regardless of status; consult the status when interpreting each run.
 
 **Generate the HTML report**
 
@@ -197,8 +192,7 @@ To generate the same experiment outputs without a parameter sweep:
 
 ```bash
 uv run python src/main.py --experiment datasets/dummy/toy1.txt \
-  --p 2 --r 1 --alpha 0.5 \
-  --time-limit 60 --session results/single-case
+  --p 2 --r 1 --alpha 0.5 --session results/single-case
 ```
 
 With pip, replace `uv run python` with `python` after activating `.venv`.
