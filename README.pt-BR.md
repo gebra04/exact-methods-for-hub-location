@@ -198,3 +198,69 @@ uv run python src/main.py --experiment datasets/dummy/toy1.txt \
 Com pip, substitua `uv run python` por `python` após ativar `.venv`.
 
 ## Resultados
+
+Os resultados estão organizados por instância e parâmetro variado. `Objective` é o valor da função objetivo, `Time` é o tempo de resolução em segundos, `hubs` lista os nós selecionados e `flow` apresenta o fluxo processado por cada hub no formato `hub:fluxo`.
+
+### CAB25
+
+#### Variação de p e r
+
+O primeiro teste utilizou `p = r = 1` e retornou um problema infactível. Em seguida, foram fixados `alpha = 0.5` e capacidade uniforme `B = 5693337`, variando `r` de `1` até `p` para `p = 3` e `p = 5`.
+
+**Três hubs (`p = 3`)**
+
+| Status | Objective | Time | p | r | hubs | flow |
+| --- | --- | --- | --- | --- | --- | --- |
+| Optimal | 8265432321.2787895 | 66.8389 | 3 | 1 | 3 11 17 | 3:5298722.0000 11:2280048.0000 17:5565268.0000 |
+| Optimal | 7743535829.674574 | 42.0576 | 3 | 2 | 3 11 17 | 3:4184606.0000 11:2126618.0000 17:4964292.0000 |
+| Optimal | 7742162357.846508 | 44.1111 | 3 | 3 | 3 11 17 | 3:4149854.0000 11:2126618.0000 17:4964292.0000 |
+
+O aumento de `r` reduziu o custo, mantendo os hubs `3`, `11` e `17`. Os fluxos por hub diminuíram ou permaneceram iguais entre essas execuções, com a maior redução de custo na passagem de `r = 1` para `r = 2`.
+
+**Cinco hubs (`p = 5`)**
+
+| Status | Objective | Time | p | r | hubs | flow |
+| --- | --- | --- | --- | --- | --- | --- |
+| Optimal | 6764854460.072403 | 27.3185 | 5 | 1 | 3 6 11 13 16 | 3:4303060.0000 6:1489344.0000 11:2280048.0000 13:1221994.0000 16:4977634.0000 |
+| Optimal | 6425607096.02948 | 136.5285 | 5 | 2 | 3 6 11 13 16 | 3:3473250.0000 6:1475238.0000 11:2066056.0000 13:1241966.0000 16:4787750.0000 |
+| Optimal | 6365597976.784062 | 112.328 | 5 | 3 | 3 6 11 13 16 | 3:3402552.0000 6:1255944.0000 11:2066056.0000 13:1241966.0000 16:4787750.0000 |
+| Optimal | 6346590993.705497 | 25.7976 | 5 | 4 | 3 6 11 13 16 | 3:3320122.0000 6:1320474.0000 11:2068704.0000 13:1221994.0000 16:4787750.0000 |
+| Optimal | 6346590993.705497 | 19.2262 | 5 | 5 | 3 6 11 13 16 | 3:3320122.0000 6:1320474.0000 11:2068704.0000 13:1221994.0000 16:4787750.0000 |
+
+Os hubs selecionados permaneceram os mesmos nas cinco execuções. O custo diminuiu até `r = 4`; passar para `r = 5` não alterou o objetivo nem os fluxos registrados. A redistribuição não reduz necessariamente o fluxo de cada hub: alguns recebem mais fluxo conforme `r` aumenta.
+
+Nos casos apresentados, aumentar a quantidade de hubs e permitir mais alocações reduziu o custo de transporte, mas não produziu uma relação monotônica com o tempo de resolução. Para `p = 5`, por exemplo, o tempo subiu de `27.3185` para `136.5285` segundos entre `r = 1` e `r = 2`, e depois caiu nas execuções seguintes.
+
+#### Variação de alpha
+
+Foram fixados `p = r = 3` e capacidade uniforme `B = 5693337`, variando `alpha` de `0.1` a `0.7`.
+
+| Status | Objective | Time | p | r | hubs | flow | alpha |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Optimal | 5930142707.276142 | 3420.243 | 3 | 3 | 3 11 16 | 3:5185556 11:2280048 16:5401480 | 0.1 |
+| Optimal | 6429833196.403355 | 181.0848 | 3 | 3 | 11 16 20 | 11:2280048 16:5029756 20:4687522 | 0.2 |
+| Optimal | 6902464548.067425 | 34.5468 | 3 | 3 | 3 11 16 | 3:4715754 11:2280048 16:4828986 | 0.3 |
+| Optimal | 7341296104.181466 | 34.5253 | 3 | 3 | 3 11 16 | 3:4430308 11:2280048 16:4828986 | 0.4 |
+| Optimal | 7742162357.846508 | 29.2235 | 3 | 3 | 3 11 17 | 3:4149854 11:2126618 17:4964292 | 0.5 |
+| Optimal | 8106433107.063498 | 163.4828 | 3 | 3 | 3 11 16 | 3:4327404 11:2126618 16:4520486 | 0.6 |
+| Optimal | 8424995470.809603 | 169.9717 | 3 | 3 | 3 11 16 | 3:4148906 11:2008080 16:4413484 | 0.7 |
+
+O custo aumentou em todas as etapas conforme `alpha` cresceu. Isso corresponde ao aumento do coeficiente de transporte entre hubs: quanto maior `alpha`, menor o desconto nesse trecho. A alteração também mudou os hubs selecionados em algumas execuções. O tempo não acompanhou uma tendência monotônica; a execução com `alpha = 0.1` foi a mais demorada, com `3420.243` segundos.
+
+#### Variação da capacidade B
+
+Foram mantidos `p = r = 3` e `alpha = 0.5`, atribuindo a mesma capacidade `B` a todos os hubs candidatos.
+
+| Status | Objective | Time | B | hubs | flow |
+| --- | --- | --- | --- | --- | --- |
+| Optimal | 9227986396.814335 | 476.6093 | 3000000 | 4 7 16 | 4:3000000 7:2991628 16:3000000 |
+| Optimal | 7742162357.846508 | 29.2235 | 5693337 | 3 11 17 | 3:4149854 11:2126618 17:4964292 |
+| Optimal | 7742162357.846508 | 30.9537 | 8000000 | 3 11 17 | 3:4149854 11:2126618 17:4964292 |
+
+Os testes com `B = 1000000` e `B = 2000000` produziram problemas infactíveis. Com `B = 3000000`, a solução selecionou os hubs `4`, `7` e `16`, e os hubs `4` e `16` atingiram suas capacidades. Essa configuração apresentou custo maior que as duas configurações de capacidade mais alta.
+
+Capacidades menores tornam as restrições mais severas e podem exigir outras localizações de hubs ou impedir a existência de uma solução viável. Já o aumento de `B = 5693337` para `B = 8000000` não alterou os hubs, os fluxos nem o objetivo registrados: a capacidade adicional não trouxe redução de custo nesses testes.
+
+### Instâncias AP
+
+As instâncias testadas foram **AP40 e AP80**. A intenção era repetir as variações realizadas para CAB25, mas ambas esgotaram a memória RAM nas máquinas utilizadas. Durante os testes, as máquinas travavam e encerravam o processo Python, impedindo a conclusão das execuções. Por isso, não são apresentados custos ou tempos de resolução para essas instâncias.

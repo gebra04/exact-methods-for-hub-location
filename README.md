@@ -198,3 +198,69 @@ uv run python src/main.py --experiment datasets/dummy/toy1.txt \
 With pip, replace `uv run python` with `python` after activating `.venv`.
 
 ## Results
+
+Results are organized by instance and varied parameter. `Objective` is the objective function value, `Time` is solver time in seconds, `hubs` lists the selected nodes, and `flow` gives the flow handled by each hub as `hub:flow`.
+
+### CAB25
+
+#### Varying p and r
+
+The first test used `p = r = 1` and was infeasible. Subsequent tests fixed `alpha = 0.5` and uniform capacity `B = 5693337`, varying `r` from `1` through `p` for `p = 3` and `p = 5`.
+
+**Three hubs (`p = 3`)**
+
+| Status | Objective | Time | p | r | hubs | flow |
+| --- | --- | --- | --- | --- | --- | --- |
+| Optimal | 8265432321.2787895 | 66.8389 | 3 | 1 | 3 11 17 | 3:5298722.0000 11:2280048.0000 17:5565268.0000 |
+| Optimal | 7743535829.674574 | 42.0576 | 3 | 2 | 3 11 17 | 3:4184606.0000 11:2126618.0000 17:4964292.0000 |
+| Optimal | 7742162357.846508 | 44.1111 | 3 | 3 | 3 11 17 | 3:4149854.0000 11:2126618.0000 17:4964292.0000 |
+
+Increasing `r` reduced cost while retaining hubs `3`, `11`, and `17`. Per-hub flows decreased or stayed unchanged across these runs, with the largest cost reduction occurring between `r = 1` and `r = 2`.
+
+**Five hubs (`p = 5`)**
+
+| Status | Objective | Time | p | r | hubs | flow |
+| --- | --- | --- | --- | --- | --- | --- |
+| Optimal | 6764854460.072403 | 27.3185 | 5 | 1 | 3 6 11 13 16 | 3:4303060.0000 6:1489344.0000 11:2280048.0000 13:1221994.0000 16:4977634.0000 |
+| Optimal | 6425607096.02948 | 136.5285 | 5 | 2 | 3 6 11 13 16 | 3:3473250.0000 6:1475238.0000 11:2066056.0000 13:1241966.0000 16:4787750.0000 |
+| Optimal | 6365597976.784062 | 112.328 | 5 | 3 | 3 6 11 13 16 | 3:3402552.0000 6:1255944.0000 11:2066056.0000 13:1241966.0000 16:4787750.0000 |
+| Optimal | 6346590993.705497 | 25.7976 | 5 | 4 | 3 6 11 13 16 | 3:3320122.0000 6:1320474.0000 11:2068704.0000 13:1221994.0000 16:4787750.0000 |
+| Optimal | 6346590993.705497 | 19.2262 | 5 | 5 | 3 6 11 13 16 | 3:3320122.0000 6:1320474.0000 11:2068704.0000 13:1221994.0000 16:4787750.0000 |
+
+The selected hubs remained unchanged across all five runs. Cost decreased through `r = 4`; increasing `r` to `5` did not change the objective or recorded flows. Redistribution does not necessarily reduce every hub's flow: some hubs receive more flow as `r` increases.
+
+In these experiments, increasing the number of hubs and allowing more allocations reduced transportation cost, but did not produce a monotonic relationship with solver time. For `p = 5`, for example, time increased from `27.3185` to `136.5285` seconds between `r = 1` and `r = 2`, then decreased in subsequent runs.
+
+#### Varying alpha
+
+These tests fixed `p = r = 3` and uniform capacity `B = 5693337`, varying `alpha` from `0.1` to `0.7`.
+
+| Status | Objective | Time | p | r | hubs | flow | alpha |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Optimal | 5930142707.276142 | 3420.243 | 3 | 3 | 3 11 16 | 3:5185556 11:2280048 16:5401480 | 0.1 |
+| Optimal | 6429833196.403355 | 181.0848 | 3 | 3 | 11 16 20 | 11:2280048 16:5029756 20:4687522 | 0.2 |
+| Optimal | 6902464548.067425 | 34.5468 | 3 | 3 | 3 11 16 | 3:4715754 11:2280048 16:4828986 | 0.3 |
+| Optimal | 7341296104.181466 | 34.5253 | 3 | 3 | 3 11 16 | 3:4430308 11:2280048 16:4828986 | 0.4 |
+| Optimal | 7742162357.846508 | 29.2235 | 3 | 3 | 3 11 17 | 3:4149854 11:2126618 17:4964292 | 0.5 |
+| Optimal | 8106433107.063498 | 163.4828 | 3 | 3 | 3 11 16 | 3:4327404 11:2126618 16:4520486 | 0.6 |
+| Optimal | 8424995470.809603 | 169.9717 | 3 | 3 | 3 11 16 | 3:4148906 11:2008080 16:4413484 | 0.7 |
+
+Cost increased at every step as `alpha` increased. This reflects the higher inter-hub transportation coefficient: a larger `alpha` means a smaller discount on that leg. The change also affected hub selection in some runs. Solver time did not follow a monotonic trend; the run with `alpha = 0.1` took the longest, at `3420.243` seconds.
+
+#### Varying capacity B
+
+These tests kept `p = r = 3` and `alpha = 0.5`, assigning the same capacity `B` to every candidate hub.
+
+| Status | Objective | Time | B | hubs | flow |
+| --- | --- | --- | --- | --- | --- |
+| Optimal | 9227986396.814335 | 476.6093 | 3000000 | 4 7 16 | 4:3000000 7:2991628 16:3000000 |
+| Optimal | 7742162357.846508 | 29.2235 | 5693337 | 3 11 17 | 3:4149854 11:2126618 17:4964292 |
+| Optimal | 7742162357.846508 | 30.9537 | 8000000 | 3 11 17 | 3:4149854 11:2126618 17:4964292 |
+
+Tests with `B = 1000000` and `B = 2000000` were infeasible. With `B = 3000000`, the solution selected hubs `4`, `7`, and `16`, and hubs `4` and `16` reached their capacities. This configuration had a higher cost than the two higher-capacity configurations.
+
+Smaller capacities make the constraints tighter and may require different hub locations or make the problem infeasible. Increasing capacity from `B = 5693337` to `B = 8000000` did not change the recorded hubs, flows, or objective: the additional capacity provided no cost reduction in these tests.
+
+### AP instances
+
+The tested instances were **AP40 and AP80**. The intention was to repeat the parameter variations performed for CAB25, but both exhausted available RAM on the machines used. During the tests, the machines froze and terminated the Python process, preventing the runs from completing. Consequently, no objective values or solver times are presented for these instances.
